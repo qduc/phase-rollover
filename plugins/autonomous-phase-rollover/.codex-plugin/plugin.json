@@ -1,6 +1,6 @@
 {
   "name": "autonomous-phase-rollover",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260915161448",
   "description": "Crash-aware phase checkpoints and fresh-session continuation for long Codex work.",
   "author": {
     "name": "qduc",
@@ -9,7 +9,12 @@
   "homepage": "https://github.com/qduc/phase-rollover",
   "repository": "https://github.com/qduc/phase-rollover",
   "license": "MIT",
-  "keywords": ["codex", "checkpoint", "continuation", "phase-rollover"],
+  "keywords": [
+    "codex",
+    "checkpoint",
+    "continuation",
+    "phase-rollover"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Autonomous Phase Rollover",

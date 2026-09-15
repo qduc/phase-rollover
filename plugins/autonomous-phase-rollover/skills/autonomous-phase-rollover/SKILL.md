@@ -34,6 +34,10 @@ Include:
 - unresolved issues and exact next action
 - active chain ID and generation when supplied by a predecessor
 
+Do not rely on session-owned state. Before preparing, settle or replace live processes, browser
+tabs, approval prompts, tool handles, and other resources that a fresh thread cannot inherit. The
+workspace filesystem and the embedded checkpoint are the portable continuity boundary.
+
 Resolve `<skill-dir>` as the directory containing this `SKILL.md`, then run:
 
 ```text
@@ -42,9 +46,22 @@ python3 <skill-dir>/scripts/prepare.py \
   --cwd <absolute-cwd> \
   --checkpoint-file <absolute-checkpoint-path> \
   --objective <short-objective> \
+  --completion-criterion <verified-done-condition> \
   --next-action <exact-next-action> \
+  --sandbox <read-only-or-workspace-write> \
+  --phase-verified \
   --model <active-model>
 ```
+
+Pass the current session's sandbox exactly. If its effective policy includes custom writable roots,
+network overrides, restricted-read rules, a named permission profile, or anything that cannot be
+represented exactly as stock `read-only` or `workspace-write`, do not prepare a rollover. The controller always uses
+`approvalPolicy: never` and declines unattended approval requests, so a continuation cannot acquire
+additional authority interactively.
+
+`prepare.py` emits a version-2 continuation capsule and binds the embedded checkpoint with its byte
+count and SHA-256 digest. A completed successor turn closes that generation only; it does not prove
+the objective complete. Verify the completion criterion or prepare the next generation.
 
 For a successor, also pass the `--chain-id` and next `--generation` given in its handoff prompt. Add `--effort` only when the current effort is known. `prepare.py` validates the request and writes it to the hook-provided path.
 
@@ -52,7 +69,9 @@ After preparation, make no more task mutations. End the turn with a concise hand
 
 ## Successor ownership check
 
-Every successor must verify ownership before task work:
+Every successor must perform the read-only ownership verification before task work. The trusted
+controller preassigns the successor's session ID before starting its turn; this command does not
+mutate the ledger:
 
 ```text
 python3 <skill-dir>/scripts/controller.py claim \
@@ -65,7 +84,7 @@ Exit nonzero means this worker does not own the generation: stop without mutatio
 
 ## Failure behavior
 
-The controller ledger is authoritative. Never create a second continuation manually after an uncertain dispatch. SessionStart recovery reconciles recorded `PREPARED`, `CHILD_CREATED`, and `ACTIVE` states. An explicit interrupt cancels pending dispatch. If permissions or a user decision are genuinely required, preserve the checkpoint and report the blocker instead of expanding authority.
+The controller ledger is authoritative. Never create a second continuation manually after an uncertain dispatch. SessionStart recovery reconciles recorded `PREPARED`, `CHILD_CREATED`, and `ACTIVE` states. A `START_UNCERTAIN` generation is quarantined from automatic retry; its recorded child can still prove ownership if the original start actually arrived. An explicit interrupt cancels only a positively unstarted dispatch. If permissions or a user decision are genuinely required, preserve the checkpoint and report the blocker instead of expanding authority.
 
 ## Harness boundary
 

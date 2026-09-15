@@ -1,6 +1,6 @@
 # Phase Rollover
 
-`phase-rollover` is a Codex plugin for continuing long-running agent work in fresh sessions with durable checkpoints and explicit ownership.
+`phase-rollover` is a Codex plugin for continuing long-running agent work in fresh sessions with durable checkpoints and explicit ownership. It recreates the useful public behavior of an in-thread context reset without depending on Codex's gated, model-only `new_context` tool.
 
 ## Why
 
@@ -28,6 +28,8 @@ codex plugin add autonomous-phase-rollover@phase-rollover
 
 Review and trust the bundled hook when Codex asks. Start a new task after installation so its SessionStart hook can register the session.
 
+Hook commands normally execute from the version captured when a task starts. During local development, if a cachebuster reinstall removes that directory while a task is still running, the launcher falls forward to another installed version of this same plugin. New tasks should still be used to pick up changed skill instructions and behavior deterministically.
+
 For repeatable team installs, publish an immutable Git tag, clone that tag on each machine, and register the checkout with the same two commands. The plugin uses the operating system's temporary directory for pending handoffs and stores durable state under `~/.codex/phase-rollover/`.
 
 ## Publish
@@ -36,9 +38,13 @@ Commit this directory to a Git repository and push it to a public or private hos
 
 ## Safety model
 
-The agent decides whether a reasoning phase is settled; the controller alone owns dispatch. It persists the child thread ID before starting work, requires the child to claim its generation, declines new permissions, and never blindly retries an uncertain started turn. Explicit interruption cancels a pending handoff.
+The agent decides whether a reasoning phase is settled; the controller alone owns dispatch. A versioned continuation capsule records the objective, completion criterion, verified checkpoint, exact next action, lineage, working directory, model, and declared sandbox. The controller validates the capsule, persists and preassigns the child thread ID before starting work, requires the child to verify that assignment read-only, declines approval requests, and never blindly retries an uncertain started turn. Explicit interruption cancels a handoff only while child task execution is positively known not to have started.
 
 The plugin prevents duplicate task execution through ownership claims. No exposed API guarantees that an empty duplicate thread object can never be created if the process crashes between remote creation and durable acknowledgement.
+
+This is not native session migration. The successor starts with fresh instructions, the checkpoint, and the same filesystem working directory. It does not inherit live processes, tool handles, browser state, private in-thread history, or other session-owned resources. The public SessionStart hook does not expose the effective source sandbox, so the preparing agent must declare its current stock `read-only` or `workspace-write` mode. Custom writable roots, network overrides, restricted-read rules, named permission profiles, unsupported modes, or unknown policy block rollover because the public lifecycle API cannot prove an equivalent child policy. Legacy version-1 requests are downgraded to `read-only`.
+
+A completed child turn closes one generation but does not prove that the original objective is complete. The successor must either verify the completion criterion or prepare the next generation at another safe phase boundary.
 
 ## Other harnesses
 
