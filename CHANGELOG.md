@@ -12,6 +12,7 @@
 - Add validated version-2 continuation capsules with completion criteria, checkpoint digests, and explicit sandbox declarations.
 - Default legacy requests to read-only and distinguish turn completion from objective completion.
 - Let hooks from already-running tasks fall forward to the current installed cache version after a local plugin update.
+- Inject configurable context-pressure advisories at 80K and 120K input tokens without bypassing safe phase gates.
 
 ## 0.1.0 - 2026-09-15
 

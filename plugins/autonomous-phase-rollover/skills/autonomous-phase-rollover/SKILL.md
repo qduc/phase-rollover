@@ -16,7 +16,14 @@ Rollover only when all of these are true:
 - Foreground commands, subagents, approvals, and destructive operations are settled.
 - Files and evidence needed by the successor are durable.
 
-Prefer rollover after diagnosis, implementation, validation, research, or review completes. Continue locally while the cause is uncertain, a live handle is essential, or the remaining work is trivial. An observed request near 80,000 input tokens strengthens the case but never overrides the safety gates.
+Prefer rollover after diagnosis, implementation, validation, research, or review completes. Continue locally while the cause is uncertain, a live handle is essential, or the remaining work is trivial.
+
+The hooks inspect the latest public `token_count` record and may inject two context-pressure signals:
+
+- At 80,000 input tokens, prefer rollover at the next verified phase boundary.
+- At 120,000 input tokens, stop expanding scope and reach the nearest verified boundary.
+
+Each signal is emitted once per growth cycle and rearms only after context drops below 60,000 tokens. These are advisory thresholds, not permission to interrupt unsafe work. For their evidence, configuration, and experimental status, read [context-advisory.md](references/context-advisory.md).
 
 Honor an explicit stop immediately. A rollover inherits the original scope and authority; it grants no new external-write permission.
 

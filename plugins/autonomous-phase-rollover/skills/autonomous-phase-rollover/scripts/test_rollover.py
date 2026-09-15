@@ -10,6 +10,8 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
@@ -33,6 +35,41 @@ hook = load("rollover_hook", ROOT / "scripts" / "hook.py")
 
 
 class RolloverTests(unittest.TestCase):
+    @staticmethod
+    def write_token_event(
+        path: pathlib.Path, input_tokens: int, cached_tokens: int = 0
+    ):
+        record = {
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "last_token_usage": {
+                        "input_tokens": input_tokens,
+                        "cached_input_tokens": cached_tokens,
+                    }
+                },
+            },
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+
+    @staticmethod
+    def write_usage_record(
+        path: pathlib.Path, input_tokens: int, cached_tokens: int = 0
+    ):
+        record = {
+            "type": "token_usage_record",
+            "payload": {
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "cached_input_tokens": cached_tokens,
+                }
+            },
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+
     def test_hook_command_falls_forward_when_live_task_root_was_replaced(self):
         plugin_root = ROOT.parents[1]
         hooks = json.loads((plugin_root / "hooks" / "hooks.json").read_text())
@@ -68,6 +105,45 @@ class RolloverTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("can't open file", result.stderr)
 
+    def test_installed_pre_tool_command_injects_advisory(self):
+        plugin_root = ROOT.parents[1]
+        hooks = json.loads((plugin_root / "hooks" / "hooks.json").read_text())
+        command = hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        with tempfile.TemporaryDirectory() as directory:
+            temp = pathlib.Path(directory)
+            transcript = temp / "rollout.jsonl"
+            self.write_usage_record(transcript, 85_000, 80_000)
+            event = {
+                "hook_event_name": "PreToolUse",
+                "session_id": "command-advisory",
+                "transcript_path": str(transcript),
+                "cwd": str(temp),
+            }
+            result = subprocess.run(
+                command,
+                shell=True,
+                check=False,
+                input=json.dumps(event),
+                text=True,
+                capture_output=True,
+                env={
+                    **os.environ,
+                    "PLUGIN_ROOT": str(plugin_root),
+                    "PHASE_ROLLOVER_DATA_ROOT": str(temp / "data"),
+                    "PHASE_ROLLOVER_REQUEST_ROOT": str(temp / "requests"),
+                },
+                timeout=5,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            self.assertEqual(
+                output["hookSpecificOutput"]["hookEventName"], "PreToolUse"
+            )
+            self.assertIn(
+                "85,000 input tokens",
+                output["hookSpecificOutput"]["additionalContext"],
+            )
+
     def test_app_server_reader_preserves_multiple_buffered_messages(self):
         with tempfile.TemporaryDirectory() as directory:
             executable = pathlib.Path(directory) / "fake-codex"
@@ -88,6 +164,130 @@ class RolloverTests(unittest.TestCase):
             finally:
                 server.close()
                 controller.CODEX_BIN = old_bin
+
+    def test_context_advisory_emits_once_at_soft_and_urgent_thresholds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            transcript = root / "rollout.jsonl"
+            event = {
+                "hook_event_name": "PreToolUse",
+                "session_id": "context-session",
+                "transcript_path": str(transcript),
+            }
+            with mock.patch.object(hook, "DATA_ROOT", root / "data"):
+                self.write_token_event(transcript, 80_000, 72_000)
+                advisory = hook.context_advisory(event)
+                self.assertIn("80,000-token advisory threshold", advisory)
+                self.assertIn("72,000 cached", advisory)
+                self.assertIsNone(hook.context_advisory(event))
+
+                self.write_token_event(transcript, 120_000, 110_000)
+                urgent = hook.context_advisory(event)
+                self.assertIn("120,000-token urgent threshold", urgent)
+                self.assertIsNone(hook.context_advisory(event))
+
+    def test_latest_usage_record_avoids_pre_tool_advisory_lag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = pathlib.Path(directory) / "rollout.jsonl"
+            self.write_token_event(transcript, 70_000, 65_000)
+            self.write_usage_record(transcript, 85_000, 80_000)
+            self.assertEqual(
+                hook.latest_context_usage(str(transcript)), (85_000, 80_000)
+            )
+
+    def test_context_advisory_rearms_after_context_drops(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            transcript = root / "rollout.jsonl"
+            event = {
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "rearmed-session",
+                "transcript_path": str(transcript),
+            }
+            with mock.patch.object(hook, "DATA_ROOT", root / "data"):
+                self.write_token_event(transcript, 82_000)
+                self.assertIsNotNone(hook.context_advisory(event))
+                self.write_token_event(transcript, 50_000)
+                self.assertIsNone(hook.context_advisory(event))
+                self.write_token_event(transcript, 81_000)
+                self.assertIsNotNone(hook.context_advisory(event))
+
+    def test_stale_concurrent_observation_cannot_reset_newer_advisory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            old_read = threading.Event()
+            release_old = threading.Event()
+            results = []
+
+            def usage(path):
+                if path == "old":
+                    old_read.set()
+                    self.assertTrue(release_old.wait(timeout=2))
+                    return 50_000, 0
+                return 125_000, 0
+
+            def invoke(path):
+                results.append(
+                    hook.context_advisory(
+                        {
+                            "hook_event_name": "PreToolUse",
+                            "session_id": "concurrent-session",
+                            "transcript_path": path,
+                        }
+                    )
+                )
+
+            with (
+                mock.patch.object(hook, "DATA_ROOT", root / "data"),
+                mock.patch.object(hook, "latest_context_usage", side_effect=usage),
+            ):
+                old_thread = threading.Thread(target=invoke, args=("old",))
+                new_thread = threading.Thread(target=invoke, args=("new",))
+                old_thread.start()
+                self.assertTrue(old_read.wait(timeout=2))
+                new_thread.start()
+                state_path = root / "data" / "advisories" / "concurrent-session.json"
+                deadline = time.monotonic() + 0.5
+                while not state_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                release_old.set()
+                old_thread.join(timeout=2)
+                new_thread.join(timeout=2)
+
+            self.assertFalse(old_thread.is_alive())
+            self.assertFalse(new_thread.is_alive())
+            self.assertEqual(sum(result is not None for result in results), 1)
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["level"], 2)
+
+    def test_pre_tool_hook_injects_context_advisory_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            transcript = root / "rollout.jsonl"
+            self.write_token_event(transcript, 85_000)
+            event = {
+                "hook_event_name": "PreToolUse",
+                "session_id": "hook-advisory-session",
+                "transcript_path": str(transcript),
+                "cwd": str(root),
+                "model": "test-model",
+            }
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(hook, "REQUEST_ROOT", root / "requests"),
+                mock.patch.object(hook, "DATA_ROOT", root / "data"),
+                mock.patch.object(hook.sys, "stdin", io.StringIO(json.dumps(event))),
+                redirect_stdout(stdout),
+            ):
+                self.assertEqual(hook.main(), 0)
+            output = json.loads(stdout.getvalue())
+            self.assertEqual(
+                output["hookSpecificOutput"]["hookEventName"], "PreToolUse"
+            )
+            self.assertIn(
+                "Phase-rollover advisory",
+                output["hookSpecificOutput"]["additionalContext"],
+            )
 
     def test_prompt_carries_lineage_and_checkpoint(self):
         request = {

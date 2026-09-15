@@ -14,6 +14,30 @@
         ]
       }
     ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hook=\"$PLUGIN_ROOT/skills/autonomous-phase-rollover/scripts/hook.py\"; if [ ! -f \"$hook\" ]; then for candidate in \"$(dirname \"$PLUGIN_ROOT\")\"/*/skills/autonomous-phase-rollover/scripts/hook.py; do [ -f \"$candidate\" ] && hook=\"$candidate\"; done; fi; exec python3 \"$hook\"",
+            "timeout": 10,
+            "additionalContextLimit": 400
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "hook=\"$PLUGIN_ROOT/skills/autonomous-phase-rollover/scripts/hook.py\"; if [ ! -f \"$hook\" ]; then for candidate in \"$(dirname \"$PLUGIN_ROOT\")\"/*/skills/autonomous-phase-rollover/scripts/hook.py; do [ -f \"$candidate\" ] && hook=\"$candidate\"; done; fi; exec python3 \"$hook\"",
+            "timeout": 10,
+            "additionalContextLimit": 400
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

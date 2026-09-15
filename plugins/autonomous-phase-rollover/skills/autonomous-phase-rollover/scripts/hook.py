@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import pathlib
@@ -21,6 +22,10 @@ DATA_ROOT = pathlib.Path(
 SKILL = pathlib.Path(__file__).resolve().parents[1]
 CONTROLLER = SKILL / "scripts" / "controller.py"
 SKILL_DOC = SKILL / "SKILL.md"
+DEFAULT_ADVISORY_TOKENS = 80_000
+DEFAULT_URGENT_TOKENS = 120_000
+DEFAULT_SCAN_BYTES = 8 * 1024 * 1024
+ADVISORY_EVENTS = {"PreToolUse", "UserPromptSubmit"}
 
 
 def atomic_write(path: pathlib.Path, payload: dict) -> None:
@@ -53,6 +58,131 @@ def launch(args: list[str], log_name: str) -> None:
         )
 
 
+def positive_env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def advisory_thresholds() -> tuple[int, int]:
+    advisory = positive_env_int(
+        "PHASE_ROLLOVER_ADVISORY_TOKENS", DEFAULT_ADVISORY_TOKENS
+    )
+    urgent = positive_env_int("PHASE_ROLLOVER_URGENT_TOKENS", DEFAULT_URGENT_TOKENS)
+    if urgent <= advisory:
+        urgent = max(advisory + 1, advisory * 3 // 2)
+    return advisory, urgent
+
+
+def latest_context_usage(transcript_path: object) -> tuple[int, int] | None:
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return None
+    path = pathlib.Path(transcript_path)
+    try:
+        size = path.stat().st_size
+        scan_bytes = positive_env_int(
+            "PHASE_ROLLOVER_TRANSCRIPT_SCAN_BYTES", DEFAULT_SCAN_BYTES
+        )
+        with path.open("rb") as handle:
+            handle.seek(max(0, size - scan_bytes))
+            tail = handle.read()
+    except OSError:
+        return None
+    for raw_line in reversed(tail.splitlines()):
+        try:
+            record = json.loads(raw_line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        payload = record.get("payload") or {}
+        if record.get("type") == "token_usage_record":
+            usage = payload.get("usage") or {}
+        elif record.get("type") == "event_msg" and payload.get("type") == "token_count":
+            usage = (payload.get("info") or {}).get("last_token_usage") or {}
+        else:
+            continue
+        input_tokens = usage.get("input_tokens")
+        cached_tokens = usage.get("cached_input_tokens", 0)
+        if (
+            isinstance(input_tokens, int)
+            and not isinstance(input_tokens, bool)
+            and input_tokens >= 0
+        ):
+            if not isinstance(cached_tokens, int) or isinstance(cached_tokens, bool):
+                cached_tokens = 0
+            return input_tokens, max(0, cached_tokens)
+    return None
+
+
+def context_advisory(event: dict) -> str | None:
+    if event.get("hook_event_name") not in ADVISORY_EVENTS:
+        return None
+    session_id = event.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return None
+    advisory, urgent = advisory_thresholds()
+    state_path = DATA_ROOT / "advisories" / f"{session_id}.json"
+    state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock_fd = os.open(f"{state_path}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(lock_fd, "a+", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        usage = latest_context_usage(event.get("transcript_path"))
+        if usage is None:
+            return None
+        input_tokens, cached_tokens = usage
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            state = {}
+        prior_level = state.get("level", 0)
+        if not isinstance(prior_level, int):
+            prior_level = 0
+
+        if input_tokens < advisory * 3 // 4:
+            if prior_level:
+                atomic_write(
+                    state_path,
+                    {
+                        "session_id": session_id,
+                        "level": 0,
+                        "input_tokens": input_tokens,
+                        "updated_at": time.time(),
+                    },
+                )
+            return None
+
+        level = 2 if input_tokens >= urgent else 1 if input_tokens >= advisory else 0
+        if level <= prior_level:
+            return None
+        atomic_write(
+            state_path,
+            {
+                "session_id": session_id,
+                "level": level,
+                "input_tokens": input_tokens,
+                "cached_input_tokens": cached_tokens,
+                "updated_at": time.time(),
+            },
+        )
+    observed = f"{input_tokens:,} input tokens"
+    if cached_tokens:
+        observed += f" ({cached_tokens:,} cached)"
+    if level == 2:
+        return (
+            f"Urgent phase-rollover advisory: the last model request used {observed}, above "
+            f"the {urgent:,}-token urgent threshold. Stop expanding scope and reach the nearest "
+            "verified phase boundary, then prepare a rollover. Do not interrupt an unsafe phase, "
+            "abandon live resources, or bypass the skill's safety gates solely to reduce context."
+        )
+    return (
+        f"Phase-rollover advisory: the last model request used {observed}, above the "
+        f"{advisory:,}-token advisory threshold. Prefer rolling over at the next verified phase "
+        "boundary if meaningful work remains; context pressure is advisory and never overrides "
+        "the skill's safety gates."
+    )
+
+
 def main() -> int:
     event = json.load(sys.stdin)
     name = event.get("hook_event_name")
@@ -70,6 +200,21 @@ def main() -> int:
         "updated_at": time.time(),
     }
     atomic_write(session_path, record)
+
+    if name in ADVISORY_EVENTS:
+        advisory = context_advisory(event)
+        if advisory:
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": name,
+                            "additionalContext": advisory,
+                        }
+                    }
+                )
+            )
+        return 0
 
     request = REQUEST_ROOT / f"{session_id}.json"
     cancel = REQUEST_ROOT / f"{session_id}.cancelled"

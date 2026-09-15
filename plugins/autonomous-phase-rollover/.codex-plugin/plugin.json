@@ -1,6 +1,6 @@
 {
   "name": "autonomous-phase-rollover",
-  "version": "0.1.0+codex.20260915161448",
+  "version": "0.1.0+codex.20260915165345",
   "description": "Crash-aware phase checkpoints and fresh-session continuation for long Codex work.",
   "author": {
     "name": "qduc",

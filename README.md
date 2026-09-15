@@ -6,6 +6,8 @@
 
 In matched real-workflow experiments, compact fresh-session handoffs reduced aggregate input tokens by 73.0% and uncached input by 80.9% while preserving exact deterministic results. The intervention removes completed transcript history from later phases rather than tuning a global context limit.
 
+The plugin watches public rollout telemetry through `UserPromptSubmit` and `PreToolUse` hooks. It injects one advisory when the latest request reaches 80,000 input tokens and one urgent advisory at 120,000. These are configurable candidate thresholds derived from local completed-run telemetry, not universal optima. Context pressure never bypasses the verified phase-boundary gate.
+
 ## Package layout
 
 - `plugins/autonomous-phase-rollover/skills/`: harness-neutral phase gate, checkpoint, and ownership protocol
@@ -41,6 +43,8 @@ Commit this directory to a Git repository and push it to a public or private hos
 The agent decides whether a reasoning phase is settled; the controller alone owns dispatch. A versioned continuation capsule records the objective, completion criterion, verified checkpoint, exact next action, lineage, working directory, model, and declared sandbox. The controller validates the capsule, persists and preassigns the child thread ID before starting work, requires the child to verify that assignment read-only, declines approval requests, and never blindly retries an uncertain started turn. Explicit interruption cancels a handoff only while child task execution is positively known not to have started.
 
 The plugin prevents duplicate task execution through ownership claims. No exposed API guarantees that an empty duplicate thread object can never be created if the process crashes between remote creation and durable acknowledgement.
+
+Context growth raises input cost roughly linearly per request; when retained context grows across many requests, cumulative replay cost can grow roughly quadratically. It is not literally exponential. The advisory aims to leave enough room to finish and verify the current phase while avoiding a long tail of repeated 80K–170K requests. See [context-advisory.md](plugins/autonomous-phase-rollover/skills/autonomous-phase-rollover/references/context-advisory.md) for the measured sample, assumptions, configuration, and A/B validation plan.
 
 This is not native session migration. The successor starts with fresh instructions, the checkpoint, and the same filesystem working directory. It does not inherit live processes, tool handles, browser state, private in-thread history, or other session-owned resources. The public SessionStart hook does not expose the effective source sandbox, so the preparing agent must declare its current stock `read-only` or `workspace-write` mode. Custom writable roots, network overrides, restricted-read rules, named permission profiles, unsupported modes, or unknown policy block rollover because the public lifecycle API cannot prove an equivalent child policy. Legacy version-1 requests are downgraded to `read-only`.
 
