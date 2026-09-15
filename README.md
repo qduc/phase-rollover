@@ -1,6 +1,6 @@
-# Autonomous Phase Rollover
+# Phase Rollover
 
-Portable checkpoint semantics with a Codex lifecycle adapter for continuing long agent work in fresh sessions.
+`phase-rollover` is a Codex plugin for continuing long-running agent work in fresh sessions with durable checkpoints and explicit ownership.
 
 ## Why
 
@@ -18,7 +18,11 @@ In matched real-workflow experiments, compact fresh-session handoffs reduced agg
 Copy this repository to a stable directory on the target machine, or clone it from Git. The target needs Python 3 and a Codex release that supports plugins, hooks, and `codex app-server`. Authentication and local approval settings are intentionally not copied.
 
 ```sh
-codex plugin marketplace add /absolute/path/to/phase-rollover-marketplace
+git clone https://github.com/qduc/phase-rollover.git
+cd phase-rollover
+git checkout v0.1.0
+
+codex plugin marketplace add "$(pwd)"
 codex plugin add autonomous-phase-rollover@phase-rollover
 ```
 

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "autonomous-phase-rollover",
+  "version": "0.1.0",
+  "description": "Crash-aware phase checkpoints and fresh-session continuation for long agent work.",
+  "author": {
+    "name": "qduc",
+    "url": "https://github.com/qduc"
+  },
+  "homepage": "https://github.com/qduc/phase-rollover",
+  "repository": "https://github.com/qduc/phase-rollover",
+  "license": "MIT",
+  "keywords": ["agent-plugin", "checkpoint", "continuation", "phase-rollover"]
+}
