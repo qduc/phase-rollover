@@ -1,0 +1,20 @@
+{
+  "name": "phase-rollover",
+  "interface": {
+    "displayName": "Phase Rollover"
+  },
+  "plugins": [
+    {
+      "name": "autonomous-phase-rollover",
+      "source": {
+        "source": "local",
+        "path": "./plugins/autonomous-phase-rollover"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

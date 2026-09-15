@@ -1,0 +1,18 @@
+{
+  "name": "autonomous-phase-rollover",
+  "version": "0.1.0",
+  "description": "Crash-aware phase checkpoints and fresh-session continuation for long Codex work.",
+  "author": {
+    "name": "qduc"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Autonomous Phase Rollover",
+    "shortDescription": "Continue long work in fresh, checkpointed sessions.",
+    "longDescription": "Reduces context replay by creating compact checkpoints at safe phase boundaries, then continuing through a crash-aware ownership ledger and the Codex app-server lifecycle.",
+    "developerName": "qduc",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Work autonomously and use safe phase rollovers until this objective is verified complete."
+  }
+}

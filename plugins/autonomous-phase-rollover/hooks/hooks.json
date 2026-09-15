@@ -1,0 +1,52 @@
+{
+  "description": "Register sessions and safely dispatch prepared phase rollovers.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/autonomous-phase-rollover/scripts/hook.py\"",
+            "timeout": 10,
+            "additionalContextLimit": 400
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/autonomous-phase-rollover/scripts/hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/autonomous-phase-rollover/scripts/hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "other",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/skills/autonomous-phase-rollover/scripts/hook.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
